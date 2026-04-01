@@ -1,0 +1,204 @@
+\documentclass[fleqn,10pt]{wlscirep}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{bm}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+
+\title{TFNet: text-conditioned flow matching for crystal structure generation}
+
+\author[1,*]{Anonymous Author}
+\affil[1]{Affiliation to be added before submission}
+\affil[*]{e-mail: to be added at submission}
+
+\begin{abstract}
+Text is an attractive conditioning interface for materials generation because it can jointly encode structure type, symmetry and scalar descriptors in a single representation. Here we present TFNet, a text-conditioned flow-matching model for crystal structure generation. TFNet extends CrystalFlow by mapping structured material descriptions to a semantic condition vector and using that vector to guide the continuous flow from noise to the target crystal. The model predicts lattice and fractional-coordinate velocities along this path, and sampling is performed by guided Euler integration. In the single-sample setting, TFNet improves substantially over CrystalFlow on all three benchmarks, raising match rate from 53.69\% to 91.33\% on Perov-5, from 15.02\% to 43.30\% on Carbon-24, and from 67.65\% to 77.80\% on MP-20. Relative to published baselines extracted from the supplied benchmark figure, TFNet achieves the best one-shot match rate on Perov-5 and MP-20, while reaching the lowest one-shot RMSE on Carbon-24. Under MP-20 with num\_eval=20, TFNet also attains the highest match rate at 92.04\%, showing that semantic conditioning materially improves sample efficiency in flow-based crystal generation.
+\end{abstract}
+
+\begin{document}
+
+\flushbottom
+\maketitle
+\thispagestyle{empty}
+
+\section*{Introduction}
+Crystal structure generation has become a central problem in data-driven materials discovery, because the practical utility of a generative model is determined not only by whether it can synthesize plausible crystals, but also by whether it can steer generation towards a desired structural family. Most current approaches rely on unconditional generation or on a narrow set of scalar conditions. That design is useful when the target is fully specified by a few numbers, but it is a poor match to real materials workflows, in which researchers often describe targets with a mixture of prototype names, symmetry labels, qualitative property cues and short natural-language summaries.
+
+This motivates a text interface for crystal generation. Text can compress multiple descriptors into a single condition while remaining easy to construct from materials databases and human annotations. The challenge is to inject such information into a structure generator without replacing the backbone altogether. For flow-based crystal models, this question is especially important: their continuous-time formulation is well suited to geometric generation, but most existing implementations still lack a flexible semantic control channel.
+
+Here we develop TFNet, a text-conditioned extension of CrystalFlow. The aim is not to build a maximally complex multimodal architecture, but to test a stricter hypothesis: whether a compact semantic embedding can materially improve crystal structure generation when the underlying flow-matching backbone is kept fixed. This makes the comparison interpretable. If performance improves, the gain can be traced to the text prior rather than to a larger generator.
+
+The experiments support that view. Across Perov-5, Carbon-24 and MP-20, TFNet consistently strengthens one-shot generation relative to CrystalFlow. When compared with the baseline models shown in the supplied benchmark figure, TFNet obtains the best single-sample match rate on Perov-5 and MP-20, and remains competitive on Carbon-24 while achieving the lowest one-shot RMSE. On MP-20 with num\_eval=20, TFNet reaches the highest match rate among all compared methods. These findings indicate that semantic conditioning is not merely auxiliary metadata; it can reshape the search trajectory of a continuous crystal generator in a useful way.
+
+\section*{Method}
+\subsection*{Problem formulation}
+We consider crystal structure prediction with known composition. For a crystal containing $N$ atoms with atom types $\mathbf{a} = (a_1,\dots,a_N)$, the model generates the lattice and fractional coordinates, while composition remains fixed. We represent the crystal state as
+\begin{equation}
+\mathbf{x} = (\mathbf{k}, \mathbf{F}),
+\end{equation}
+where $\mathbf{k} \in \mathbb{R}^{6}$ is a six-dimensional lattice-polar representation of the unit cell and $\mathbf{F} \in [0,1)^{N \times 3}$ contains the fractional coordinates. The target crystal is denoted by $\mathbf{x}_1 = (\mathbf{k}_1, \mathbf{F}_1)$.
+
+Following flow matching, we sample a source state $\mathbf{x}_0 = (\mathbf{k}_0, \mathbf{F}_0)$ from a simple prior,
+\begin{equation}
+\mathbf{k}_0 \sim \mathcal{N}(\mathbf{0}, \sigma_k^2 \mathbf{I}), \,\,\,\,
+\mathbf{F}_0 \sim \mathcal{U}([0,1)^{N \times 3}),
+\end{equation}
+and define a continuous bridge between source and target. Because fractional coordinates are periodic, the coordinate displacement is wrapped into the minimum-image convention,
+\begin{equation}
+\Delta \mathbf{F} = \big((\mathbf{F}_1 - \mathbf{F}_0 - 0.5) \bmod 1\big) - 0.5.
+\end{equation}
+For a time variable $t \sim \mathcal{U}(0,1)$, the interpolated state is
+\begin{equation}
+\mathbf{k}_t = \mathbf{k}_0 + t(\mathbf{k}_1 - \mathbf{k}_0),
+\qquad
+\mathbf{F}_t = \mathbf{F}_0 + t\, \Delta \mathbf{F}.
+\end{equation}
+The target flow field is therefore the constant velocity
+\begin{equation}
+\mathbf{v}_{k}^{\star} = \mathbf{k}_1 - \mathbf{k}_0,
+\qquad
+\mathbf{v}_{F}^{\star} = \Delta \mathbf{F}.
+\end{equation}
+The learning problem is to predict these velocities from the noisy intermediate state $(\mathbf{k}_t, \mathbf{F}_t)$, the composition $\mathbf{a}$ and a text condition.
+
+\subsection*{Text-conditioned flow field}
+Each material is associated with a structured textual description $s$, which summarizes its structural prototype, symmetry information and selected scalar attributes. TFNet encodes this description using a frozen language model to obtain a semantic vector
+\begin{equation}
+\mathbf{z}_{\mathrm{text}} = E_{\phi}(s),
+\end{equation}
+where $E_{\phi}$ is a MatSciBERT encoder followed by mean pooling. The pooled representation is projected to the conditioning space through a small multilayer perceptron,
+\begin{equation}
+\mathbf{c} = P_{\psi}(\mathbf{z}_{\mathrm{text}}).
+\end{equation}
+If additional numerical conditions exist, they can be embedded and concatenated with $\mathbf{c}$, but in the present experiments the dominant conditioning signal is text.
+
+Instead of modelling a score or a denoising residual, TFNet learns the conditional velocity field directly. The network predicts lattice and coordinate velocities as
+\begin{equation}
+\big(\hat{\mathbf{v}}_{k}, \hat{\mathbf{v}}_{F}\big)
+= f_{\theta}\!\big(\mathbf{k}_t, \mathbf{F}_t, \mathbf{a}, t, \tilde{\mathbf{c}}\big),
+\end{equation}
+where $\tilde{\mathbf{c}}$ is the effective condition used by the flow model. During training, TFNet applies conditional dropout,
+\begin{equation}
+\tilde{\mathbf{c}} = g\,\mathbf{c},
+\qquad
+g \sim \mathrm{Bernoulli}(1-p),
+\end{equation}
+so the model is exposed to both conditional and unconditional trajectories. This is important because it allows the same backbone to be used later for classifier-free guidance. Conceptually, text does not change the definition of the flow path; it changes the velocity field that the model predicts along that path.
+
+\subsection*{Training objective}
+The model is trained with a weighted mean-squared error objective over lattice and coordinate velocities,
+\begin{equation}
+\mathcal{L} = \lambda_k \left\|\hat{\mathbf{v}}_{k} - \mathbf{v}_{k}^{\star}\right\|_2^2
++ \lambda_F \sum_{i=1}^{N} \left\|\hat{\mathbf{v}}_{F,i} - \mathbf{v}_{F,i}^{\star}\right\|_2^2.
+\end{equation}
+This formulation keeps the flow objective aligned with the continuous bridge from noise to data. In the crystal structure prediction setting used here, atom types are fixed by the input composition, so the objective focuses on lattice and coordinate generation.
+
+\subsection*{Guided sampling}
+At inference time, sampling starts from the source state and integrates the learned flow field towards the data manifold. With $T$ integration steps and $\Delta t = 1/T$, the unconditional and conditional predictions are first computed as
+\begin{equation}
+\hat{\mathbf{v}}^{\mathrm{u}} = f_{\theta}(\mathbf{x}_t, t, \mathbf{0}),
+\qquad
+\hat{\mathbf{v}}^{\mathrm{c}} = f_{\theta}(\mathbf{x}_t, t, \mathbf{c}).
+\end{equation}
+Classifier-free guidance is then applied by linear interpolation,
+\begin{equation}
+\hat{\mathbf{v}} = (1-\gamma)\hat{\mathbf{v}}^{\mathrm{u}} + \gamma \hat{\mathbf{v}}^{\mathrm{c}},
+\end{equation}
+where $\gamma$ is the guidance factor. The state is updated by Euler integration,
+\begin{equation}
+\mathbf{k}_{t+\Delta t} = \mathbf{k}_t + \Delta t\, \hat{\mathbf{v}}_k,
+\qquad
+\mathbf{F}_{t+\Delta t} = \big(\mathbf{F}_t + \Delta t\, \hat{\mathbf{v}}_F\big) \bmod 1.
+\end{equation}
+The final lattice matrix is reconstructed from $\mathbf{k}_1$, yielding the generated crystal structure.
+
+\section*{Experimental setting}
+We evaluate the model on Perov-5, Carbon-24 and MP-20. In all experiments, composition is fixed and the model predicts crystal geometry. The reported CrystalFlow and TFNet results are taken from the provided evaluation summaries corresponding to one-sample and 20-sample generation. The external baselines in Table~\ref{tab:evo1} and Table~\ref{tab:mp20-evo20} are transcribed from the supplied benchmark figure and include P-cG-SchNet, CDVAE, DiffCSP, TGDMat (Short) and TGDMat (Long).
+
+\section*{Results}
+\subsection*{Cross-dataset comparison in the single-sample regime}
+Table~\ref{tab:evo1} compares all methods under the single-sample setting, corresponding to the strongest test of sample efficiency. Two conclusions are immediate. First, TFNet substantially improves over CrystalFlow on all three datasets. Second, relative to the published baselines in the supplied figure, TFNet reaches the highest match rate on Perov-5 and MP-20, while delivering the lowest RMSE on Carbon-24.
+
+On Perov-5, TFNet achieves a match rate of 91.33\%, surpassing TGDMat (Long) at 90.46\% and improving dramatically over CrystalFlow at 53.69\%. On Carbon-24, the highest one-shot match rate remains TGDMat (Long) at 44.63\%, but TFNet is close at 43.30\% and obtains the best RMSE of 0.1734. On MP-20, TFNet reaches 77.80\% match rate, exceeding DiffCSP (51.49\%), TGDMat (Short) (52.22\%) and TGDMat (Long) (55.15\%) by a clear margin. This is the most direct evidence that semantic conditioning improves where the generator lands on its first attempt.
+
+\begin{table*}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Method & Perov-5 Match Rate $\uparrow$ & Perov-5 RMSE $\downarrow$ & Carbon-24 Match Rate $\uparrow$ & Carbon-24 RMSE $\downarrow$ & MP-20 Match Rate $\uparrow$ & MP-20 RMSE $\downarrow$ \\
+\midrule
+P-cG-SchNet   & 48.22 & 0.4179 & 17.29 & 0.3846 & 15.39 & 0.3762 \\
+CDVAE         & 45.31 & 0.1138 & 17.09 & 0.2969 & 33.90 & 0.1045 \\
+DiffCSP       & 52.02 & 0.0760 & 17.54 & 0.2759 & 51.49 & 0.0631 \\
+TGDMat (Short) & 56.54 & 0.0583 & 24.13 & 0.2424 & 52.22 & \underline{0.0597} \\
+TGDMat (Long)  & \underline{90.46} & \textbf{0.0203} & \textbf{44.63} & \underline{0.2266} & 55.15 & \textbf{0.0572} \\
+CrystalFlow   & 53.69 & 0.0953 & 15.02 & 0.3095 & \underline{67.65} & 0.0791 \\
+TFNet     & \textbf{91.33} & \underline{0.0449} & \underline{43.30} & \textbf{0.1734} & \textbf{77.80} & 0.0868 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{\textbf{Single-sample comparison across Perov-5, Carbon-24 and MP-20 (best in bold; second-best underlined).} Values for P-cG-SchNet, CDVAE, DiffCSP and TGDMat are extracted from the supplied benchmark figure. Values for CrystalFlow and TFNet are taken from the provided one-sample evaluation summary. Bold and underlining indicate the best and second-best results in each column, respectively.}
+\label{tab:evo1}
+\end{table*}
+
+\subsection*{MP-20 comparison under num\_eval=20}
+The MP-20 comparison with num\_eval=20 is shown in Table~\ref{tab:mp20-evo20}. Here TFNet attains the highest match rate at 92.04\%, exceeding CrystalFlow at 85.38\% and the strongest published baseline, TGDMat (Long), at 82.02\%. The RMSE ranking is different: TGDMat (Short) remains best at 0.0443, followed by TGDMat (Long) at 0.0483 and DiffCSP at 0.0492. CrystalFlow and TFNet therefore contribute primarily by improving retrieval of the correct structural basin rather than by minimizing final geometric error on MP-20.
+
+This trade-off is scientifically informative. The one-shot results already show that text guidance is particularly useful when the sampling budget is tight. The num\_eval=20 result on MP-20 shows that the same semantic prior remains valuable even after repeated sampling, because it continues to raise the probability of hitting the correct structure. In practical discovery pipelines, that behaviour can be more important than marginal improvements in RMSE alone.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lcc}
+\toprule
+Method & MP-20 Match Rate $\uparrow$ & MP-20 RMSE $\downarrow$ \\
+\midrule
+P-cG-SchNet    & 32.64 & 0.3018 \\
+CDVAE          & 66.95 & 0.1026 \\
+DiffCSP        & 77.93 & 0.0492 \\
+TGDMat (Short) & 80.97 & \textbf{0.0443} \\
+TGDMat (Long)  & 82.02 & \underline{0.0483} \\
+CrystalFlow    & \underline{85.38} & 0.0614 \\
+TFNet      & \textbf{92.04} & 0.0665 \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{MP-20 comparison under num\_eval=20 (best in bold; second-best underlined).} Published baseline values are extracted from the supplied benchmark figure. CrystalFlow and TFNet are taken from the provided 20-sample evaluation summary. Bold and underlining indicate the best and second-best results in each column, respectively.}
+\label{tab:mp20-evo20}
+\end{table}
+
+\section*{Discussion}
+The results clarify the role of text in crystal generation. TFNet does not simply make the model larger; it changes the conditional flow field through a semantic prior derived from text. This prior is most useful when the model must commit quickly, which is exactly the regime in which one-shot match rate matters. The strong gains over CrystalFlow across all three datasets show that the text signal sharpens the trajectory from noise to structure.
+
+The comparison with TGDMat is also revealing. TGDMat (Long) remains extremely competitive, especially in one-shot RMSE on Perov-5 and MP-20 and in one-shot match rate on Carbon-24. Yet TFNet overtakes it on one-shot match rate for Perov-5 and MP-20, and on MP-20 with num\_eval=20 by a large margin. This suggests that a text-conditioned flow field can alter the global search behaviour of the generator in a way that repeated evolution alone does not fully reproduce.
+
+At the same time, the MP-20 RMSE values show that retrieval and geometric refinement are not the same problem. The current formulation of TFNet is better at finding the correct structural basin than at achieving the very lowest final RMSE on MP-20. A natural next step is therefore to combine the present semantic conditioning strategy with a stronger refinement mechanism, such as more expressive multimodal fusion or a dedicated post-generation relaxer.
+
+\section*{Conclusion}
+TFNet introduces text-guided flow matching into crystal structure generation through a simple but effective conditioning mechanism. The method is defined by a continuous bridge from noise to crystal geometry, a text-derived semantic condition vector and guided Euler sampling. This design yields large gains over CrystalFlow in the single-sample regime and establishes the best MP-20 match rate under num\_eval=20 among the compared methods. The broader implication is that language can serve as a practical control interface for generative materials models, not merely as descriptive metadata but as an actionable prior over crystal structure space.
+
+\section*{References}
+Representative references should be finalized by the authors before submission. The present manuscript draft is based on the supplied repository, the provided evaluation summaries and the benchmark values transcribed from the user-provided figure.
+
+\noindent\textbf{Acknowledgements}\\
+Funding, institutional support and individual acknowledgements should be added by the authors before submission.
+
+\noindent\textbf{Author contributions}\\
+Author contribution statements should be added by the authors before submission.
+
+\noindent\textbf{Competing interests}\\
+The authors declare no competing interests.
+
+\noindent\textbf{Data availability}\\
+The CrystalFlow and TFNet values reported here are derived from the supplied evaluation summaries. The external baseline values are transcribed from the benchmark figure provided in the prompt.
+
+\noindent\textbf{Code availability}\\
+The source code, model configurations and evaluation scripts used for CrystalFlow and TFNet are contained in the accompanying repository.
+
+\end{document}

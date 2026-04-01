@@ -1,0 +1,7 @@
+dataset,model,match_rate,rms_dist,metrics_file
+carbon_24,baseline,0.8921182266009853,0.2208309021377925,hydra_jobs/singlerun/CSP-carbon24-baseline-gpu0/eval_metrics_carbon24_baseline_gpu5_texttest.json
+carbon_24,text,0.8502463054187193,0.156144695268477,hydra_jobs/singlerun/CSP-carbon24-text-gpu1-offline-emb/eval_metrics_carbon24_text_gpu6_texttest.json
+perov_5,baseline,1.0,0.041578220524910954,hydra_jobs/singlerun/CSP-perov5-baseline-gpu4/eval_metrics_perov5_baseline_gpu5_texttest.json
+perov_5,text,0.9661822985468956,0.03489991328754796,hydra_jobs/singlerun/CSP-perov5-text-gpu7-offline-emb/eval_metrics_perov5_text_gpu6_texttest.json
+eval_metrics_mp20_baseline_gpu5_texttest_csp1.json,baseline,0.85375,0.061401413567408816,hydra_jobs/singlerun/CSP-mp20-baseline-gpu2/eval_metrics_mp20_baseline_gpu5_texttest_csp1.json
+eval_metrics_mp20_text_gpu6_texttest_csp1.json,text,0.920375,0.06653308902731025,hydra_jobs/singlerun/CSP-mp20-text-gpu3-offline-emb/eval_metrics_mp20_text_gpu6_texttest_csp1.json

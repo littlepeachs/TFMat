@@ -1,0 +1,25 @@
+_target_: diffcsp.pl_modules.flow.CSPFlow
+time_dim: 256
+latent_dim: 0
+cost_type: 1.
+cost_coord: 1.
+cost_lattice: 1.
+max_neighbors: 20
+radius: 7.
+timesteps: 1000
+guide_threshold: -1
+
+defaults:
+  - decoder: cspnet
+  - beta_scheduler: cosine
+  - sigma_scheduler: wrapped
+  - conditions: default
+  - _self_
+
+lattice_polar: true
+
+decoder:
+  pred_type: false
+  smooth: ${model.decoder.pred_type}
+  lattice_dim: 6
+  ip: false

@@ -1,0 +1,36 @@
+_target_: diffcsp.pl_modules.flow_rm.CSPFlowRM
+time_dim: 256
+latent_dim: 0
+cost_type: 1.
+cost_coord: 1.
+cost_lattice: 1.
+max_neighbors: 20
+radius: 7.
+timesteps: 1000
+
+# RMFlow-specific hyperparameters
+adaptive_gamma: 0.5
+adaptive_c: 1.0e-3
+time_sample_p: 0.5
+lambda_nll: 5.0e-2
+lambda_cond_reg: 0.0
+sigma_min_lattice: 1.0e-3
+sigma_min_coord: 1.0e-3
+transport_sigma_lattice: 0.0
+transport_sigma_coord: 0.0
+sample_refine: true
+
+defaults:
+  - decoder: cspnet
+  - beta_scheduler: cosine
+  - sigma_scheduler: wrapped
+  - conditions: default
+  - _self_
+
+lattice_polar: true
+lattice_polar_sigma: 0.1
+decoder:
+  pred_type: false
+  smooth: ${model.decoder.pred_type}
+  lattice_dim: 6
+  ip: false
