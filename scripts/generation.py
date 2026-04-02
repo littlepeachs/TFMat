@@ -4,6 +4,8 @@ import time
 import argparse
 import torch
 from ast import literal_eval
+from collections.abc import Sequence
+import random
 
 from tqdm import tqdm
 from torch.optim import Adam
@@ -179,11 +181,12 @@ def diffusion(
     )
 
 class SampleDataset(Dataset):
-    def __init__(self, dataset, total_num, conditions: dict):
+    def __init__(self, dataset, total_num, conditions: dict, seed: int | None = None):
         super().__init__()
         self.total_num = total_num
         self.distribution = train_dist[dataset]
-        self.num_atoms = np.random.choice(len(self.distribution), total_num, p = self.distribution)
+        rng = np.random.default_rng(seed)
+        self.num_atoms = rng.choice(len(self.distribution), total_num, p=self.distribution)
         self.is_carbon = dataset == 'carbon_24'
         self.conditions = {k: torch.tensor(v, dtype=torch.float32) if not isinstance(v, torch.Tensor) else v for k, v in conditions.items()}
 
@@ -205,6 +208,41 @@ class SampleDataset(Dataset):
         return data
 
 
+class PrecomputedEmbeddingSampleDataset(Dataset):
+    def __init__(self, dataset, embeddings: torch.Tensor, embedding_name: str, conditions: dict, seed: int | None = None):
+        super().__init__()
+        self.embeddings = embeddings.detach().cpu().to(torch.float32)
+        self.embedding_name = embedding_name
+        self.total_num = int(self.embeddings.shape[0])
+        self.distribution = train_dist[dataset]
+        rng = np.random.default_rng(seed)
+        self.num_atoms = rng.choice(len(self.distribution), self.total_num, p=self.distribution)
+        self.is_carbon = dataset == 'carbon_24'
+        self.conditions = {
+            key: torch.tensor(val, dtype=torch.float32) if not isinstance(val, torch.Tensor) else val.detach().cpu().to(torch.float32)
+            for key, val in conditions.items()
+        }
+
+    def __len__(self) -> int:
+        return self.total_num
+
+    def __getitem__(self, index):
+        num_atom = self.num_atoms[index]
+        sample_conditions = {
+            key: val.view(1, -1)
+            for key, val in self.conditions.items()
+        }
+        sample_conditions[self.embedding_name] = self.embeddings[index].view(1, -1)
+        data = Data(
+            num_atoms=torch.LongTensor([num_atom]),
+            num_nodes=num_atom,
+            **sample_conditions,
+        )
+        if self.is_carbon:
+            data.atom_types = torch.LongTensor([6] * num_atom)
+        return data
+
+
 def parse_conditions(cond_string: str | None) -> dict:
     conditions = {}
     if cond_string is None:
@@ -219,13 +257,86 @@ def parse_conditions(cond_string: str | None) -> dict:
     return conditions
 
 
+def _get_test_dataset_cfg(cfg):
+    test_cfg = cfg.data.datamodule.datasets.test
+    if isinstance(test_cfg, Sequence) and not isinstance(test_cfg, (str, bytes)):
+        if len(test_cfg) == 0:
+            raise ValueError("cfg.data.datamodule.datasets.test is empty.")
+        return test_cfg[0]
+    return test_cfg
+
+
+def resolve_precomputed_text_embedding_source(args, cfg):
+    embedding_path = args.text_embedding_path
+    embedding_name = args.text_embedding_name
+
+    if embedding_path is not None:
+        if embedding_name is None:
+            embedding_name = 'text_embedding'
+        return Path(embedding_path), embedding_name
+
+    data_conditions = list(getattr(cfg.data, 'conditions', []))
+    if args.text is not None or 'text_embedding' not in data_conditions:
+        return None, embedding_name
+
+    test_cfg = _get_test_dataset_cfg(cfg)
+    embedding_path = getattr(test_cfg, 'precomputed_text_embedding_path', None)
+    if embedding_path is None:
+        return None, embedding_name
+
+    if embedding_name is None:
+        embedding_name = getattr(test_cfg, 'precomputed_text_embedding_name', 'text_embedding')
+
+    return Path(embedding_path), embedding_name
+
+
+def load_precomputed_text_embeddings(embedding_path: Path):
+    payload = torch.load(embedding_path, map_location='cpu', weights_only=False)
+    if 'embeddings' not in payload:
+        raise KeyError(f"Expected 'embeddings' in precomputed embedding payload: {embedding_path}")
+    embeddings = payload['embeddings']
+    if not isinstance(embeddings, torch.Tensor):
+        embeddings = torch.as_tensor(embeddings)
+    material_ids = payload.get('material_id')
+    return embeddings.to(torch.float32), material_ids
+
+
+def maybe_subsample_embeddings(embeddings, material_ids, num_samples: int | None, seed: int | None):
+    if num_samples is None:
+        return embeddings, material_ids
+    if num_samples <= 0:
+        raise ValueError("num_samples must be positive.")
+    total = int(embeddings.shape[0])
+    if num_samples > total:
+        raise ValueError(f"Requested {num_samples} samples, but only {total} text embeddings are available.")
+    if num_samples == total:
+        return embeddings, material_ids
+
+    rng = np.random.default_rng(seed)
+    selected = np.sort(rng.choice(total, size=num_samples, replace=False))
+    embeddings = embeddings[selected]
+    if material_ids is not None:
+        material_ids = [material_ids[i] for i in selected.tolist()]
+    return embeddings, material_ids
+
+
 def main(args):
     # load_data if do reconstruction.
     model_path = Path(args.model_path)
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+
     model, _, cfg = load_model(model_path, load_data=False)
     args.guide_factor = resolve_guide_factor(model, args.guide_factor)
+    text_embedding_path, text_embedding_name = resolve_precomputed_text_embedding_source(args, cfg)
 
     if args.guide_factor is not None:
+        if args.text is not None and text_embedding_path is not None:
+            raise ValueError("--text and --text-embedding-path/auto test embeddings cannot be used together.")
         conditions = parse_conditions(args.conditions)
         if args.text is not None:
             text_embedding = encode_texts(
@@ -246,12 +357,35 @@ def main(args):
     else:
         conditions = {}
 
+    if args.guide_factor is not None and args.text is None and text_embedding_path is None:
+        data_conditions = set(getattr(cfg.data, 'conditions', []))
+        if 'text_embedding' in data_conditions and 'text_embedding' not in conditions:
+            raise ValueError(
+                "This checkpoint expects text_embedding guidance. Provide --text or a test-set precomputed embedding file."
+            )
+
     if torch.cuda.is_available():
         model.to('cuda')
 
     print('Evaluate the diffusion model.')
 
-    test_set = SampleDataset(args.dataset, args.batch_size * args.num_batches_to_samples, conditions=conditions)
+    material_ids = None
+    if text_embedding_path is not None:
+        embeddings, material_ids = load_precomputed_text_embeddings(text_embedding_path)
+        embeddings, material_ids = maybe_subsample_embeddings(embeddings, material_ids, args.num_samples, args.seed)
+        print(f'Using test-set precomputed text embeddings from {text_embedding_path} ({embeddings.shape[0]} samples).')
+        test_set = PrecomputedEmbeddingSampleDataset(
+            args.dataset,
+            embeddings=embeddings,
+            embedding_name=text_embedding_name,
+            conditions=conditions,
+            seed=args.seed,
+        )
+    else:
+        total_num = args.num_samples
+        if total_num is None:
+            total_num = args.batch_size * args.num_batches_to_samples
+        test_set = SampleDataset(args.dataset, total_num, conditions=conditions, seed=args.seed)
     test_loader = DataLoader(test_set, batch_size=args.batch_size)
 
     if args.ode_int_steps is not None:
@@ -278,6 +412,7 @@ def main(args):
         'atom_types': atom_types,
         'lengths': lengths,
         'angles': angles,
+        'material_id': material_ids,
         'time': time.time() - start_time,
     }, model_path / gen_out_name)
 
@@ -287,6 +422,8 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model_path', required=True)
     parser.add_argument('-S', '--num_batches_to_samples', default=20, type=int, help='number of batches to sample (default: 20)')
     parser.add_argument('-B', '--batch_size', default=500, type=int, help='sample batch size (default: 500)')
+    parser.add_argument('--num-samples', type=int, help='total number of samples to generate; overrides batch_size * num_batches_to_samples and optionally subsamples text embeddings')
+    parser.add_argument('--seed', type=int, help='random seed used for num_atoms sampling and optional text embedding subsampling')
     parser.add_argument('--label', default='')
 
     step_group = parser.add_argument_group('evaluate step')
@@ -305,6 +442,8 @@ if __name__ == '__main__':
     guidance_group.add_argument('--guide-factor', type=float, help='guidance factor (default: None)')
     guidance_group.add_argument('--conditions', help='conditions string as "a=b;c=d,e", conditions are splited by ";", values are treated by float or float vector')
     guidance_group.add_argument('--text', help='Text prompt used to build a text_embedding condition')
+    guidance_group.add_argument('--text-embedding-path', help='Path to a test-split precomputed text embedding payload (.pt). When omitted, auto-detect from the checkpoint test dataset config if available.')
+    guidance_group.add_argument('--text-embedding-name', help='Condition key used for precomputed text embeddings (defaults to the test dataset config value or text_embedding).')
     guidance_group.add_argument('--text-model-name', default='m3rg-iitd/matscibert', help='Hugging Face model id for encoding text prompts')
     guidance_group.add_argument('--text-pooling', choices=['cls', 'mean'], default='mean', help='Pooling mode for text encoder output')
     guidance_group.add_argument('--text-max-length', type=int, default=256, help='Max token length for text prompt encoding')
