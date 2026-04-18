@@ -30,3 +30,7 @@ model_checkpoints:
   save_top_k: 1
   verbose: False
   save_last: False
+
+periodic_checkpoints:
+  every_n_epochs: 100
+  verbose: False

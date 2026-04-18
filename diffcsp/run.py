@@ -79,6 +79,19 @@ def build_callbacks(cfg: DictConfig) -> List[Callback]:
             )
         )
 
+    if "periodic_checkpoints" in cfg.train:
+        every_n = cfg.train.periodic_checkpoints.every_n_epochs
+        hydra.utils.log.info(f"Adding callback <ModelCheckpoint every_n_epochs={every_n}>")
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=ckpt_dir,
+                every_n_epochs=every_n,
+                save_top_k=-1,
+                verbose=cfg.train.periodic_checkpoints.verbose,
+                filename="periodic-{epoch}",
+            )
+        )
+
     callbacks.append(
         TQDMProgressBar(
             refresh_rate=cfg.logging.progress_bar_refresh_rate,
@@ -190,12 +203,17 @@ def save_scaler(datamodule, save_dir):
 
 
 def find_ckpt(ckpt_dir) -> str | None:
+    import re
     ckpts = list(ckpt_dir.glob('*.ckpt'))
     if len(ckpts) > 0:
-        ckpt_epochs = np.array([int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts])
+        epoch_pattern = re.compile(r'epoch=(\d+)')
+        ckpt_epochs = []
+        for ckpt in ckpts:
+            m = epoch_pattern.search(ckpt.name)
+            ckpt_epochs.append(int(m.group(1)) if m else -1)
+        ckpt_epochs = np.array(ckpt_epochs)
         ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
         hydra.utils.log.info(f"found checkpoint: {ckpt}")
-        # ckpt = Path(ckpt)
     else:
         ckpt = None
     return ckpt

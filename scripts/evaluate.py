@@ -72,12 +72,14 @@ def main(args):
     model_path = Path(args.model_path)
     test_dataset_path = Path(args.test_dataset_path).resolve() if args.test_dataset_path else None
     test_dataset_save_path = Path(args.test_dataset_save_path).resolve() if args.test_dataset_save_path else None
+    test_text_embedding_path = Path(args.test_text_embedding_path).resolve() if args.test_text_embedding_path else None
     model, test_loader, cfg = load_model(
         model_path,
         load_data=True,
         test_bs=args.test_bs,
         test_dataset_path=test_dataset_path,
         test_dataset_save_path=test_dataset_save_path,
+        test_text_embedding_path=test_text_embedding_path,
     )
     args.guide_factor = resolve_guide_factor(model, args.guide_factor)
 
@@ -122,6 +124,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize.")
     parser.add_argument('--test_dataset_path', type=str, help="override test dataset csv path.")
     parser.add_argument('--test_dataset_save_path', type=str, help="override cached preprocess pt path for the test dataset.")
+    parser.add_argument('--test_text_embedding_path', type=str, help="override precomputed text embedding payload for the test dataset.")
     parser.add_argument('--label', default='', help="label for output")
 
     step_group = parser.add_argument_group('evaluate step')

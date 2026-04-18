@@ -166,6 +166,7 @@ def load_model(
     test_bs=None,
     test_dataset_path=None,
     test_dataset_save_path=None,
+    test_text_embedding_path=None,
 ):
     with initialize_config_dir(str(model_path), version_base="1.3"):
         cfg = hydra.compose(config_name='hparams')
@@ -204,6 +205,10 @@ def load_model(
         if test_dataset_save_path is not None:
             for dataset_cfg in cfg.data.datamodule.datasets.test:
                 dataset_cfg.save_path = str(test_dataset_save_path)
+        if test_text_embedding_path is not None:
+            for dataset_cfg in cfg.data.datamodule.datasets.test:
+                if hasattr(dataset_cfg, 'precomputed_text_embedding_path'):
+                    dataset_cfg.precomputed_text_embedding_path = str(test_text_embedding_path)
         if load_data:
             datamodule = hydra.utils.instantiate(
                 cfg.data.datamodule, _recursive_=False, scaler_path=model_path

@@ -220,3 +220,39 @@ tex/*.synctex.gz
 tex/*.toc
 
 TGDMat/
+
+# All results and outputs (moved here for archival)
+all_results/
+
+# Hydra job outputs
+hydra/
+hydra_jobs/
+
+# Generated crystals and analysis outputs (if not moved yet)
+generated_crystals/
+matplotlib-cache/
+cgcnn_models/
+
+# Preview images and PDFs
+*_preview.png
+*.pdf
+
+# Analysis results (keep only essential CSVs)
+element_composition_match_results_*.txt
+element_match_*.csv
+element_match_*.txt
+FINAL_RESULTS_*.txt
+
+# Temporary analysis plots (but keep docs/ figures for README)
+prediction_scatter_plots.png
+property_distributions.png
+
+# Shell scripts for batch generation
+scripts/generate_*_gpu*.sh
+scripts/run_*_sweep.sh
+
+# Temporary image files
+image-*.png
+
+# Claude assistant files
+.claude/
