@@ -157,7 +157,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 HYDRA_FULL_ERROR=1 python diffcsp/run.py \
   +train.pl_trainer.strategy=ddp_find_unused_parameters_true \
   data=mp_20_text \
   data.train_max_epochs=2000 \
-  model=flow_polar_w_type_text \
+  model=flow_polar_w_type \
   model.text_encoder=matscibert \
   model.text_condition_dim=768 \
   model.condition_dropout=0.1 \

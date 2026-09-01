@@ -128,7 +128,7 @@ CUDA_VISIBLE_DEVICES=0 python diffcsp/run.py \
 CUDA_VISIBLE_DEVICES=0,1,2,3 python diffcsp/run.py \
   train.pl_trainer.devices=4 \
   data=mp_20_text \
-  model=flow_polar_w_type_text \
+  model=flow_polar_w_type \
   data.train_max_epochs=2000 \
   +model.type_encoding=table \
   optim.optimizer.lr=1e-3 \
@@ -139,6 +139,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python diffcsp/run.py \
   logging.wandb.mode=online \
   expname=DNG-mp20-text
 ```
+
+For DNG, text conditioning is supplied by `data=mp_20_text`; the corresponding
+model configuration is `flow_polar_w_type`.
 
 ### Evaluation
 

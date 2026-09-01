@@ -17,8 +17,7 @@ CrystalFlow/
 │   ├── model/
 │   │   ├── flow_polar.yaml        # CSP flow model (baseline)
 │   │   ├── flow_polar_text.yaml   # CSP with text conditioning
-│   │   ├── flow_polar_w_type.yaml # DNG flow model (baseline)
-│   │   └── flow_polar_w_type_text.yaml  # DNG with text conditioning
+│   │   └── flow_polar_w_type.yaml # DNG model; text conditioning comes from data=*_text
 │   ├── optim/
 │   │   └── default.yaml           # Optimizer and scheduler settings
 │   └── train/

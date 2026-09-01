@@ -1,0 +1,4 @@
+# Default data configuration used for Hydra help and bare entry-point invocation.
+# Paper experiments explicitly override this with one of the benchmark configs.
+defaults:
+  - mp_20
